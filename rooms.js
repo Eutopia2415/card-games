@@ -13,7 +13,7 @@ export class Rooms{
     if(this.code.length!==10)throw Error('Enter the ten-character room code.');
     await this.openPeer();this.conn=this.peer.connect('kvp-'+this.code,{reliable:true,serialization:'json'});
     const conn=this.conn;let welcomed=false;
-    const timeout=setTimeout(()=>{if(!welcomed){conn.close();this.cb.error('Could not join. Check the code and ask the host to keep their tab open.');}},20000);
+    const timeout=setTimeout(()=>{if(!welcomed){conn.close();this.cb.error('Could not connect. Check the room code and host tab. This network may block direct WebRTC connections.');}},20000);
     conn.on('open',()=>conn.send({type:'hello',name:safeName(name),token}));
     conn.on('data',data=>{
       if(!data||typeof data!=='object')return;
@@ -28,7 +28,7 @@ export class Rooms{
   }
   openPeer(id){
     return new Promise((resolve,reject)=>{
-      const peer=new Peer(id,{debug:2});this.peer=peer;const timer=setTimeout(()=>reject(Error('Room service did not respond. Try again.')),15000);
+      const peer=new Peer(id,{debug:0});this.peer=peer;const timer=setTimeout(()=>reject(Error('Room service did not respond. Try again.')),15000);
       peer.on('open',()=>{clearTimeout(timer);resolve();});
       peer.on('error',e=>{clearTimeout(timer);const msg=e.type==='peer-unavailable'?'Room not found. Check the code and keep the host’s tab open.':'Room service unavailable. Check your connection and try again.';reject(Error(msg));this.cb.error(msg);});
       peer.on('disconnected',()=>{if(!this.closed&&!peer.destroyed)peer.reconnect();});
