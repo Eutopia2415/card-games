@@ -1,5 +1,6 @@
 import {GameRuntime,seed,storedGame,saveGame} from './runtime.js';
-import {Rooms} from './rooms.js';
+import {Rooms} from './rooms.js?v=relay-v1';
+import {RELAY_URL} from './relay-config.js?v=relay-v1';
 import {initUI,setState,lobbyState,setBusy,setLocked,showError} from './ui.js';
 const $=id=>document.getElementById(id);
 let runtime,room,state,mode='solo',timer,paused=false,actionId=0,epoch=0,chain=Promise.resolve();
@@ -18,7 +19,7 @@ function publish(result){
 }
 function dispatch(payload){
   const ticket=epoch;clear();
-  const task=async()=>{if(ticket!==epoch)throw Error('Session changed.');const r=await runtime.request({...payload,solo:mode==='solo'});if(ticket===epoch)publish(r);return r;};
+  const task=async()=>{if(ticket!==epoch)throw Error('Session changed.');if(payload.expectedRevision!==undefined&&payload.expectedRevision!==state.revision)throw Error('Stale game state. Wait for an update.');const r=await runtime.request({...payload,solo:mode==='solo'});if(ticket===epoch)publish(r);return r;};
   const result=chain.then(task);chain=result.catch(()=>{});return result;
 }
 async function solo(){
@@ -28,7 +29,7 @@ async function solo(){
   try{await dispatch({command:'init',seed:seed(),saved:storedGame(),humans:[0],names:['You','Leo','Mira']});if(ticket===epoch){setLocked(false);banner('Solo practice · expert bots');}}
   catch(e){if(ticket===epoch)showError(e.message);}
 }
-function pause(message){paused=true;clear();setLocked(true);banner(message);if(mode==='host')room.pause(message);}
+function pause(message){paused=true;clear();setLocked(true);banner(message);}
 function roomCallbacks(){return{
   error:message=>{showError(message);$('room-error').textContent=message;},
   paused:pause,
@@ -43,7 +44,7 @@ function roomCallbacks(){return{
   view:view=>{if(mode!=='guest')return;paused=false;state=view;setState(view);setLocked(false);showError('');banner('Room '+room.code+' · '+view.names[view.player]);if($('room-dialog').open)$('room-dialog').close();},
   action:async(p,body,conn)=>{
     if(!room.connected()){conn.send({type:'error',error:'A player is disconnected. Wait for them to reconnect.'});return;}
-    try{await dispatch({command:'action',player:p,action:body.action,cards:body.cards,rank:body.rank,seed:seed()});}
+    try{await dispatch({command:'action',expectedRevision:body.relayRevision,player:p,action:body.action,cards:body.cards,rank:body.rank,seed:seed()});}
     catch(e){if(conn.open)conn.send({type:'error',error:e.message});}
   },
   rejoin:async()=>{paused=!room.connected();try{await dispatch({command:'seats',humans:room.humans,names:room.names});banner(paused?'Waiting for disconnected players.':'Room '+room.code+' · everyone connected');}catch(e){showError(e.message);}}
@@ -51,12 +52,12 @@ function roomCallbacks(){return{
 async function createRoom(){
   $('room-error').textContent='';$('create-room').disabled=true;
   try{
-    room?.close();const newRoom=new Rooms(roomCallbacks());room=newRoom;
+    room?.close();const newRoom=new Rooms(roomCallbacks(),{endpoint:RELAY_URL});room=newRoom;
     epoch++;clear();runtime?.close();chain=Promise.resolve();mode='host';paused=false;setLocked(true);
     runtime=new GameRuntime(banner);
     await room.create($('player-name').value||'Host');
     await dispatch({command:'init',seed:seed(),humans:[0],names:room.names});
-    room.lobby();
+    roomCallbacks().lobby({code:room.code,names:room.names,humans:room.humans});
   }catch(e){$('room-error').textContent=e.message;showError(e.message);}
   finally{$('create-room').disabled=false;}
 }
@@ -66,7 +67,7 @@ async function joinRoom(){
     const code=$('room-code').value.trim().toUpperCase().replace(/[^A-Z2-9]/g,'');
     if(code.length!==10)throw Error('Enter the ten-character room code.');
     epoch++;clear();runtime?.close();chain=Promise.resolve();room?.close();mode='guest';paused=false;setLocked(true);
-    room=new Rooms(roomCallbacks());let token;try{token=sessionStorage.getItem('kvp-room-'+code);}catch{}
+    room=new Rooms(roomCallbacks(),{endpoint:RELAY_URL});let token;try{token=sessionStorage.getItem('kvp-room-'+code);}catch{}
     banner('Connecting to room…');await room.join(code,$('player-name').value||'Player',token);
   }catch(e){$('room-error').textContent=e.message;showError(e.message);}
   finally{$('join-room').disabled=false;}
