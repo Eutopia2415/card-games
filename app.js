@@ -1,14 +1,15 @@
-import {GameRuntime,seed,storedGame,saveGame} from './runtime.js';
+import {GameRuntime,seed,storedGame,saveGame} from './runtime.js?v=midnight-v1';
 import {Rooms} from './rooms.js?v=relay-v1';
 import {RELAY_URL} from './relay-config.js?v=relay-v1';
-import {initUI,setState,lobbyState,setBusy,setLocked,showError} from './ui.js';
+import {initUI,setState,lobbyState,setBusy,setLocked,showError,animationDelay} from './ui.js?v=midnight-v1';
+import {friendlyError} from './messages.js?v=midnight-v1';
 const $=id=>document.getElementById(id);
 let runtime,room,state,mode='solo',timer,paused=false,actionId=0,epoch=0,chain=Promise.resolve();
 function banner(message){$('connection').textContent=message||'';}
 function clear(){clearTimeout(timer);}
 function schedule(){
   clear();if(paused||mode==='guest'||(mode==='host'&&!room?.started)||!state||state.phase==='done'||state.phase==='lobby'||state.humans.includes(state.turn))return;
-  timer=setTimeout(()=>dispatch({command:'step'}).catch(error=>{showError(error.message);banner('Bot turn stopped. Reload to resume.');}),500);
+  timer=setTimeout(()=>dispatch({command:'step'}).catch(error=>{console.warn('Bot turn interrupted:',error);showError(error.message,'bot');banner('Bot turn interrupted. Retry to continue.');}),500+animationDelay());
 }
 function publish(result){
   if(mode==='guest')return;
@@ -31,7 +32,7 @@ async function solo(){
 }
 function pause(message){paused=true;clear();setLocked(true);banner(message);}
 function roomCallbacks(){return{
-  error:message=>{showError(message);$('room-error').textContent=message;},
+  error:message=>{showError(message);$('room-error').textContent=friendlyError(message);},
   paused:pause,
   welcome:data=>{try{sessionStorage.setItem('kvp-room-'+room.code,data.token);}catch{};},
   lobby:info=>{
@@ -58,7 +59,7 @@ async function createRoom(){
     await room.create($('player-name').value||'Host');
     await dispatch({command:'init',seed:seed(),humans:[0],names:room.names});
     roomCallbacks().lobby({code:room.code,names:room.names,humans:room.humans});
-  }catch(e){$('room-error').textContent=e.message;showError(e.message);}
+  }catch(e){$('room-error').textContent=friendlyError(e.message);showError(e.message);}
   finally{$('create-room').disabled=false;}
 }
 async function joinRoom(){
@@ -69,7 +70,7 @@ async function joinRoom(){
     epoch++;clear();runtime?.close();chain=Promise.resolve();room?.close();mode='guest';paused=false;setLocked(true);
     room=new Rooms(roomCallbacks(),{endpoint:RELAY_URL});let token;try{token=sessionStorage.getItem('kvp-room-'+code);}catch{}
     banner('Connecting to room…');await room.join(code,$('player-name').value||'Player',token);
-  }catch(e){$('room-error').textContent=e.message;showError(e.message);}
+  }catch(e){$('room-error').textContent=friendlyError(e.message);showError(e.message);}
   finally{$('join-room').disabled=false;}
 }
 async function action(action,extra={}){
@@ -80,14 +81,14 @@ async function action(action,extra={}){
     else await dispatch({command:'action',player:0,action,...extra,seed:seed()});
   }catch(e){showError(e.message);}
 }
-initUI({action});
+initUI({action,retry:async()=>{setBusy(true);try{await dispatch({command:'step'});banner(mode==='host'?'Room '+room.code+' · everyone connected':'Solo practice · expert bots');}catch(e){console.warn('Bot retry interrupted:',e);showError(e.message,'bot');}}});
 $('friends').onclick=()=>$('room-dialog').showModal();$('close-room').onclick=()=>$('room-dialog').close();
 $('create-room').onclick=createRoom;$('join-room').onclick=joinRoom;
 $('start-room').onclick=async()=>{
   if(!room?.host||room.humans.length<2||!room.connected())return;
   $('start-room').disabled=true;
   try{await dispatch({command:'seats',humans:room.humans,names:room.names});room.started=true;paused=false;const r=await runtime.request({command:'view'});publish(r);$('room-dialog').close();banner('Room '+room.code+' · keep the host’s tab open');}
-  catch(e){showError(e.message);$('room-error').textContent=e.message;$('start-room').disabled=false;}
+  catch(e){showError(e.message);$('room-error').textContent=friendlyError(e.message);$('start-room').disabled=false;}
 };
 $('solo').onclick=()=>{if(mode!=='solo'&&!confirm('Leave this room and return to solo practice?'))return;$('room-dialog').close();solo();};
 $('copy-room').onclick=async()=>{

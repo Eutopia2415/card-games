@@ -38,4 +38,40 @@ class BrowserBridgeTests(unittest.TestCase):
         first=self.call(command='init',seed=33,solo=True);saved=first['saved'];r=self.call(command='init',seed=99,saved=saved,solo=True);self.assertEqual(saved,r['saved'])
         self.assertNotIn('saved',self.call(command='view'))
 
+    def test_animation_cues_only_reveal_public_plays(self):
+        result=self.start();self.assertEqual(result['views'][0]['events'],[{'kind':'deal'}])
+        p=bridge.state['turn'];card=bridge.state['hands'][p][0]
+        result=self.call(command='action',player=p,action='play',cards=[card])
+        for v in result['views']:
+            self.assertEqual(v['events'][0]['cards'],[card]);self.assertEqual(v['events'][0]['player'],p)
+            self.assertEqual(v['events'][0]['kind'],'play')
+        self.assertEqual(result['views'][0]['events'][0]['cleared'],card[0]=='A')
+
+    def test_private_exchange_cues_contain_counts_only(self):
+        self.start();s=game.new(17,2,['King','Villager','Peasant'])
+        self.call(command='init',seed=1,saved=s,humans=[0,1,2])
+        rank=bridge.state['hands'][2][0][0]
+        result=self.call(command='action',player=0,action='ask',rank=rank)
+        for v in result['views']:
+            self.assertEqual(v['events'],[{'kind':'transfer','source':2,'player':0,'count':1}])
+        # A third question can both transfer privately and deal the two aside cards.
+        bridge.state['questions']=2;bridge.state['received']=0
+        absent=next(r for r in bot.RANKS if not any(c[0]==r for c in bridge.state['hands'][2]))
+        result=self.call(command='action',player=0,action='ask',rank=absent)
+        for v in result['views']:self.assertEqual(v['events'],[{'kind':'draw','player':1,'count':2}])
+        self.assertEqual(len(result['views'][1]['hand']),12)
+
+    def test_ace_and_bomb_clear_cues(self):
+        for bomb in [False,True]:
+            self.start();s=bridge.state;p=s['turn']
+            cards=['7C','7D','7H','7S'] if bomb else ['AC']
+            for c in cards:
+                for h in s['hands']:
+                    if c in h:h.remove(c)
+                if c in s['aside']:s['aside'].remove(c)
+                s['hands'][p].append(c)
+            result=self.call(command='action',player=p,action='play',cards=cards)
+            self.assertTrue(result['views'][0]['events'][0]['cleared']);self.assertIsNone(result['views'][0]['top'])
+            self.assertEqual(result['views'][0]['events'][0]['cards'],cards)
+
 if __name__=='__main__':unittest.main()

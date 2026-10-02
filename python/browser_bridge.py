@@ -7,13 +7,32 @@ state = None
 humans = [0]
 names = ['You', 'Leo', 'Mira']
 revision = 0
+events = []
+
+def _events(before, after, actor):
+    """Animation cues contain public plays and counts, never private card faces."""
+    cues = []
+    added = after['played'][len(before['played']):]
+    if added:
+        cues.append(dict(kind='play', player=actor, cards=added, cleared=after['top'] is None))
+    elif before['phase']=='play' and after['phase']=='play':
+        cues.append(dict(kind='pass', player=actor, cleared=before['top'] is not None and after['top'] is None))
+    elif before['phase']=='questions' and after['received']>before['received']:
+        cues.append(dict(kind='transfer', source=after['roles'].index('Peasant'), player=actor, count=1))
+    elif before['phase']=='return':
+        cues.append(dict(kind='transfer', source=actor, player=after['roles'].index('Peasant'), count=before['received']))
+    elif before['phase']=='villager':
+        cues.append(dict(kind='discard', player=actor, cards=after['exposed']))
+    if before['phase']!='villager' and after['phase']=='villager':
+        cues.append(dict(kind='draw', player=after['turn'], count=2))
+    return cues
 
 def _view(p):
     v = game.view(state)
     v.update(hand=sorted(state['hands'][p], key=bot.DECK.index),
         eligible=list(state['hands'][p]) if state['phase']=='villager' and state['turn']==p else [],
         bombs=[r for r in bot.RANKS if sum(c[0]==r for c in state['hands'][p])==4],
-        player=p, names=names, humans=humans, revision=revision)
+        player=p, names=names, humans=humans, revision=revision, events=events)
     return v
 
 def _valid_saved(s):
@@ -23,7 +42,7 @@ def _valid_saved(s):
     except (KeyError,TypeError): return False
 
 def handle(raw):
-    global state, humans, names, revision
+    global state, humans, names, revision, events
     data=json.loads(raw)
     command=data['command']
     if command=='init':
@@ -34,10 +53,12 @@ def handle(raw):
         game.NAMES=names
         saved=data.get('saved')
         state=json.loads(json.dumps(saved)) if saved and _valid_saved(saved) else game.new(data['seed'])
+        events=[] if saved and _valid_saved(saved) else [dict(kind='deal')]
         revision+=1
     elif command=='seats':
         if state is None: raise ValueError('Game is loading.')
         humans=data['humans'];names=data['names'];game.NAMES=names
+        events=[]
         revision+=1
     elif command=='action':
         p=data['player'];a=data['action']
@@ -53,10 +74,12 @@ def handle(raw):
         elif a=='play': game.play(candidate,p,data.get('cards',[]))
         elif a=='pass': game.pass_turn(candidate,p)
         else: raise ValueError('Unknown action.')
+        events=[dict(kind='deal')] if a in {'new','next'} else _events(state,candidate,p)
         state=candidate;revision+=1
     elif command=='step':
         if state['phase']!='done' and state['turn'] not in humans:
-            candidate=json.loads(json.dumps(state));game.step(candidate);state=candidate;revision+=1
+            actor=state['turn'];candidate=json.loads(json.dumps(state));game.step(candidate)
+            events=_events(state,candidate,actor);state=candidate;revision+=1
     elif command!='view': raise ValueError('Unknown command.')
     # Full snapshots are used only for local solo persistence, never sent to peers.
     result={'views':[_view(p) for p in range(3)]}

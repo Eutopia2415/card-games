@@ -7,7 +7,7 @@ const ready=(async()=>{
     const py=await loadPyodide({indexURL:RUNTIME});
     py.FS.mkdir('/game');
     for(const name of ['game','bot','expert_bot','previous_bot','endgame','browser_bridge']){
-      const r=await fetch(new URL('python/'+name+'.py',self.location.href));
+      const r=await fetch(new URL('python/'+name+'.py?v=midnight-v1',self.location.href));
       if(!r.ok)throw Error('Unable to load game rules.');
       py.FS.writeFile('/game/'+name+'.py',await r.text());
     }

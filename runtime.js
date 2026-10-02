@@ -1,10 +1,11 @@
+import {friendlyError} from './messages.js?v=midnight-v1';
 export class GameRuntime{
   constructor(onLoading=()=>{}){
-    this.pending=new Map();this.id=0;this.worker=new Worker(new URL('./game-worker.js',import.meta.url),{type:'module'});
+    this.pending=new Map();this.id=0;this.worker=new Worker(new URL('./game-worker.js?v=midnight-v1',import.meta.url),{type:'module'});
     this.ready=new Promise((resolve,reject)=>{this.resolve=resolve;this.reject=reject;});
     this.worker.onmessage=({data})=>{
       if(data.type==='ready'){onLoading('');this.resolve();return;}
-      if(data.type==='fatal'){this.reject(Error(data.error));onLoading(data.error);return;}
+      if(data.type==='fatal'){this.reject(Error(data.error));onLoading(friendlyError(data.error));return;}
       const p=this.pending.get(data.id);if(!p)return;this.pending.delete(data.id);
       data.error?p.reject(Error(data.error)):p.resolve(data.result);
     };
